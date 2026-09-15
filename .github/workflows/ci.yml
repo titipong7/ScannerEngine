@@ -1,0 +1,105 @@
+name: CI
+
+# Also callable from deploy.yml, so a deploy can never skip the checks.
+on:
+  push:
+    branches: ["**"]
+  pull_request:
+  workflow_call:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  engine:
+    name: Engine tests (Python ${{ matrix.python }})
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    strategy:
+      fail-fast: false
+      matrix:
+        python: ["3.11", "3.12"]
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python }}
+          cache: pip
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt pytest
+
+      - name: Run tests
+        # The suite is deliberately offline — every DNS answer and certificate is
+        # generated or faked — so it does not depend on a runner's egress rules.
+        run: pytest -q
+
+      - name: Check the app imports and every route is registered
+        run: |
+          python - <<'PY'
+          import main
+          paths = sorted(r.path for r in main.app.routes if r.path.startswith(("/scan", "/health")))
+          expected = ["/health", "/scan/dkim", "/scan/dns", "/scan/email", "/scan/full", "/scan/tls"]
+          assert paths == expected, f"routes changed: {paths}"
+          print("routes ok:", paths)
+          PY
+
+  dashboard:
+    name: Dashboard build
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+
+      - name: Install dependencies
+        working-directory: web
+        run: npm ci
+
+      - name: Type check
+        working-directory: web
+        run: npm run typecheck
+
+      - name: Build
+        working-directory: web
+        run: npm run build
+
+  image:
+    name: ARM64 image builds
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+
+    steps:
+      - uses: actions/checkout@v4
+
+      # The Oracle instance is aarch64, so an image that only builds on x86 is a
+      # deploy-time failure. Build the real target architecture here instead.
+      - uses: docker/setup-qemu-action@v3
+        with:
+          platforms: arm64
+
+      - uses: docker/setup-buildx-action@v3
+
+      - name: Build for linux/arm64
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          platforms: linux/arm64
+          push: false
+          load: false
+          cache-from: type=gha
+          cache-to: type=gha,mode=max

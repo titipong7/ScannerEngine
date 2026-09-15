@@ -53,7 +53,9 @@
 - [x] Caddy reverse proxy + TLS อัตโนมัติ (`deploy/Caddyfile`, `docker-compose.prod.yml`)
 - [ ] ตั้ง `API_KEY` ใน `.env` เพื่อไม่ให้ใครก็ได้ยิง Scanner ของเรา
 - [x] สคริปต์ deploy ที่ verify แล้ว rollback ให้ถ้า container ใหม่ไม่ healthy
-      (`deploy/deploy.sh`) — ยกระดับเป็น GitHub Actions ทีหลังได้
+      (`deploy/deploy.sh`)
+- [x] GitHub Actions: CI ทุก push + auto-deploy เมื่อเข้า `main`
+      (`.github/workflows/`) — ตั้งค่าตาม `docs/DEPLOY-ORACLE.md` §8
 
 **เกณฑ์ผ่าน:** `curl https://scanner.<domain>/health` ได้ `{"status":"ok"}` จากเครื่องนอก
 

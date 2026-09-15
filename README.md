@@ -16,7 +16,8 @@ app/scanners/dkim.py     DKIM selector discovery and key inspection
 app/scoring.py           Weighted score + A-F grade
 app/storage.py           Supabase writes (best effort)
 supabase/schema.sql      Table DDL
-deploy/                  bootstrap.sh, deploy.sh, Caddyfile
+deploy/                  bootstrap.sh, deploy.sh, remote-deploy.sh, Caddyfile
+.github/workflows/       CI + auto-deploy
 tests/                   Offline unit tests
 web/                     Next.js dashboard (see web/README.md)
 ```
@@ -207,6 +208,13 @@ bash deploy/bootstrap.sh        # Docker, firewall rules, outbound-DNS check
 cp .env.example .env && nano .env
 bash deploy/deploy.sh           # build, start, verify, roll back on failure
 ```
+
+Once the box is up, `.github/workflows/deploy.yml` takes over: every push to
+`main` runs the full CI suite (engine tests on 3.11 and 3.12, the dashboard
+build, and an actual `linux/arm64` image build) and only then deploys, over SSH,
+the exact commit that triggered the run. `deploy/remote-deploy.sh` is the single
+command it invokes, so the CI key can be locked to it in `authorized_keys` and
+cannot open a shell. Setup is in `docs/DEPLOY-ORACLE.md` §8.
 
 `docker-compose.prod.yml` adds Caddy in front for automatic TLS and caps the log
 files; the engine keeps its `127.0.0.1` binding, so the only public listeners are

@@ -155,7 +155,115 @@ Root Directory ของโปรเจกต์ตั้งเป็น `web`
 จากนั้นแคบ CORS ของ engine จาก `*` เหลือเฉพาะ origin ของ Vercel — แก้ใน
 `main.py` ที่ `allow_origins` แล้ว deploy ใหม่
 
-## 8. งานดูแลหลังจากนี้
+## 8. Auto-deploy ด้วย GitHub Actions
+
+หลังตั้งค่าส่วนนี้ ทุก push เข้า `main` จะรันเทสต์แล้ว deploy ให้เองโดยไม่ต้อง SSH
+
+มีสอง workflow:
+
+* `.github/workflows/ci.yml` — เทสต์ engine (Python 3.11 + 3.12), typecheck + build
+  dashboard, และ **build image สำหรับ linux/arm64 จริง** ด้วย QEMU เพราะ image ที่
+  build ผ่านแค่บน x86 คือความพังที่จะไปโผล่ตอน deploy
+* `.github/workflows/deploy.yml` — เรียก `ci.yml` ก่อนเสมอ แล้วค่อย deploy
+  จึงไม่มีทางที่โค้ดยังไม่ผ่านเทสต์จะขึ้น production
+
+### 8.1 สร้าง deploy key
+
+**บนเครื่อง Oracle:**
+
+```bash
+ssh-keygen -t ed25519 -f ~/.ssh/github_actions -C "github-actions" -N ""
+cat ~/.ssh/github_actions.pub >> ~/.ssh/authorized_keys
+chmod 600 ~/.ssh/authorized_keys
+
+cat ~/.ssh/github_actions          # private key — เอาไปใส่ GitHub secret
+ssh-keyscan -H "$(curl -s ifconfig.me)"   # host key — เอาไปใส่ GitHub secret
+```
+
+> ใช้คีย์ใหม่เฉพาะงานนี้ ไม่ใช้คีย์ส่วนตัวที่คุณ SSH เข้าเครื่องเอง จะได้เพิกถอนทีหลังได้
+> โดยไม่กระทบอะไร
+
+### 8.2 ใส่ค่าใน GitHub
+
+Settings → Secrets and variables → Actions
+
+**Secrets** (แท็บ Secrets):
+
+| ชื่อ | ค่า |
+|---|---|
+| `SSH_HOST` | public IP ของ instance |
+| `SSH_USER` | `ubuntu` |
+| `SSH_PRIVATE_KEY` | เนื้อหาทั้งไฟล์ `~/.ssh/github_actions` (รวมบรรทัด BEGIN/END) |
+| `SSH_KNOWN_HOSTS` | ผลลัพธ์ของ `ssh-keyscan -H <ip>` |
+| `SSH_PORT` | ใส่เฉพาะถ้าไม่ได้ใช้ 22 |
+
+**Variables** (แท็บ Variables):
+
+| ชื่อ | ค่า |
+|---|---|
+| `SCANNER_DOMAIN` | `scanner.yourdomain.com` (ใช้ยืนยันหลัง deploy) |
+| `APP_DIR` | ใส่เฉพาะถ้า clone ไว้ที่อื่นที่ไม่ใช่ `~/ScannerEngine` |
+
+`SSH_KNOWN_HOSTS` ไม่ใช่ของประดับ — workflow ตั้ง `StrictHostKeyChecking=yes`
+เพราะ runner ของ GitHub ไม่มี IP ตายตัว ถ้าใช้ `StrictHostKeyChecking=no`
+เท่ากับยอมมอบ deploy key ให้ใครก็ตามที่ตอบรับที่ IP นั้น ซึ่งคือความเสี่ยงทั้งหมด
+ของการ deploy ผ่าน SSH จาก runner สาธารณะ
+
+### 8.3 ล็อกคีย์ให้รันได้แค่คำสั่ง deploy (แนะนำ)
+
+`deploy/remote-deploy.sh` ถูกแยกออกมาเป็นคำสั่งเดียวเพื่อการนี้ แก้บรรทัดของคีย์ใน
+`~/.ssh/authorized_keys` ให้เป็น:
+
+```
+command="bash ~/ScannerEngine/deploy/remote-deploy.sh",no-port-forwarding,no-agent-forwarding,no-X11-forwarding,no-pty ssh-ed25519 AAAA... github-actions
+```
+
+ทำแบบนี้แล้วคีย์นี้เปิด shell ไม่ได้อีกเลย ต่อให้ workflow, คนที่มีสิทธิ์ในรีโป
+หรือ GitHub เองถูกเจาะ — มันทำได้อย่างเดียวคือ deploy commit ที่มีอยู่ใน origin
+แล้วเท่านั้น สคริปต์ตรวจว่า argument เป็น sha 40 ตัวจริงๆ และเป็น ancestor ของ
+`origin/main` ก่อนแตะอะไรทั้งสิ้น
+
+> `remote-deploy.sh` ทำ `git reset --hard` แปลว่าไฟล์ที่ track ไว้ซึ่งถูกแก้บนเครื่อง
+> จะถูกเขียนทับ (`.env` ไม่ได้ track จึงปลอดภัย) — เครื่อง production ควรสะท้อน git
+> เสมอ ถ้าจะแก้อะไรให้แก้ที่รีโปแล้ว deploy
+
+### 8.4 ทางเลือก: self-hosted runner (ไม่ต้องเปิด SSH เข้าเครื่องเลย)
+
+ถ้าไม่อยากเปิดพอร์ต 22 ออกอินเทอร์เน็ต ให้ติดตั้ง runner บนเครื่อง Oracle แทน
+runner จะ **เชื่อมออก** ไปหา GitHub เอง ไม่ต้องมี inbound port และไม่ต้องเก็บ
+private key ไว้ใน GitHub:
+
+```bash
+# Settings → Actions → Runners → New self-hosted runner → Linux ARM64
+mkdir ~/actions-runner && cd ~/actions-runner
+# ทำตามคำสั่ง download/config ที่หน้านั้นให้มา แล้ว:
+sudo ./svc.sh install && sudo ./svc.sh start
+```
+
+แล้วแก้ `deploy.yml` job `deploy` เป็น `runs-on: self-hosted` และแทนที่ step
+"Set up the SSH key" กับ "Deploy" ด้วย:
+
+```yaml
+      - run: bash ~/ScannerEngine/deploy/remote-deploy.sh ${{ github.sha }}
+```
+
+ข้อแลกเปลี่ยน: runner มีสิทธิ์เข้าถึงรีโปและรันโค้ดบนเครื่อง production ดังนั้น
+**ห้ามเปิดให้ workflow จาก fork รันบน runner ตัวนี้** (Settings → Actions →
+Fork pull request workflows)
+
+### 8.5 ลองยิงดู
+
+```bash
+git commit --allow-empty -m "Test the deploy pipeline" && git push
+```
+
+ดูที่แท็บ Actions ควรได้ `ci` เขียวทั้ง 3 job แล้วตามด้วย `deploy` และปิดท้ายด้วย
+notice ว่า `https://<domain>/health is answering`
+
+ถ้าอยากสั่ง deploy เองโดยไม่ต้อง push ใช้ Actions → Deploy to Oracle Cloud →
+Run workflow
+
+## 9. งานดูแลหลังจากนี้
 
 ```bash
 # ดู log

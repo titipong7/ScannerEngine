@@ -1,0 +1,108 @@
+name: Deploy to Oracle Cloud
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+    inputs:
+      reason:
+        description: "Why are you deploying by hand?"
+        required: false
+
+permissions:
+  contents: read
+
+# One deploy at a time. Two pushes in quick succession must not race each other
+# through `docker compose up` on the same box; the newer one waits its turn.
+concurrency:
+  group: deploy-production
+  cancel-in-progress: false
+
+jobs:
+  ci:
+    # A deploy runs the full CI suite first — there is no path that ships
+    # untested code to production.
+    uses: ./.github/workflows/ci.yml
+
+  deploy:
+    needs: ci
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    # Create this environment in Settings → Environments to add a required
+    # reviewer if you ever want deploys to be approved by hand.
+    environment:
+      name: production
+      url: https://${{ vars.SCANNER_DOMAIN }}
+
+    steps:
+      - name: Check the required secrets are present
+        env:
+          SSH_HOST: ${{ secrets.SSH_HOST }}
+          SSH_USER: ${{ secrets.SSH_USER }}
+          SSH_KEY: ${{ secrets.SSH_PRIVATE_KEY }}
+          SSH_KNOWN_HOSTS: ${{ secrets.SSH_KNOWN_HOSTS }}
+        run: |
+          missing=()
+          [[ -z "$SSH_HOST" ]]        && missing+=(SSH_HOST)
+          [[ -z "$SSH_USER" ]]        && missing+=(SSH_USER)
+          [[ -z "$SSH_KEY" ]]         && missing+=(SSH_PRIVATE_KEY)
+          [[ -z "$SSH_KNOWN_HOSTS" ]] && missing+=(SSH_KNOWN_HOSTS)
+          if [[ ${#missing[@]} -gt 0 ]]; then
+            echo "::error::missing repository secrets: ${missing[*]}"
+            echo "See docs/DEPLOY-ORACLE.md for how to generate each one."
+            exit 1
+          fi
+
+      - name: Set up the SSH key
+        env:
+          SSH_KEY: ${{ secrets.SSH_PRIVATE_KEY }}
+          SSH_KNOWN_HOSTS: ${{ secrets.SSH_KNOWN_HOSTS }}
+        run: |
+          mkdir -p ~/.ssh && chmod 700 ~/.ssh
+          printf '%s\n' "$SSH_KEY" > ~/.ssh/deploy_key
+          chmod 600 ~/.ssh/deploy_key
+          # Pin the host key. StrictHostKeyChecking=no would hand this deploy key
+          # to whoever answers on that address, which is the whole risk of
+          # deploying over SSH from a runner with no fixed egress IP.
+          printf '%s\n' "$SSH_KNOWN_HOSTS" > ~/.ssh/known_hosts
+          chmod 600 ~/.ssh/known_hosts
+
+      - name: Deploy
+        env:
+          SSH_HOST: ${{ secrets.SSH_HOST }}
+          SSH_USER: ${{ secrets.SSH_USER }}
+          SSH_PORT: ${{ secrets.SSH_PORT || '22' }}
+          APP_DIR: ${{ vars.APP_DIR || '~/ScannerEngine' }}
+          COMMIT: ${{ github.sha }}
+        run: |
+          # One command, with the commit as its only argument. remote-deploy.sh
+          # checks out exactly the commit that triggered this run — not whatever
+          # HEAD happens to be, or two overlapping pushes would both deploy the
+          # later one and the earlier run would report success for code it never
+          # shipped — and refuses anything that is not an ancestor of
+          # origin/main. Because it is a single fixed command, the deploy key can
+          # be locked to it in authorized_keys; see the script's header.
+          ssh -i ~/.ssh/deploy_key -p "$SSH_PORT" \
+              -o StrictHostKeyChecking=yes \
+              -o ConnectTimeout=15 \
+              "$SSH_USER@$SSH_HOST" \
+              "bash $APP_DIR/deploy/remote-deploy.sh $COMMIT"
+
+      - name: Verify the deployed version answers
+        if: vars.SCANNER_DOMAIN != ''
+        env:
+          DOMAIN: ${{ vars.SCANNER_DOMAIN }}
+        run: |
+          for attempt in $(seq 1 10); do
+            if curl -fsS --max-time 10 "https://$DOMAIN/health" -o health.json; then
+              cat health.json
+              echo
+              echo "::notice::https://$DOMAIN/health is answering"
+              exit 0
+            fi
+            sleep 5
+          done
+          echo "::error::https://$DOMAIN/health did not answer after the deploy"
+          echo "deploy.sh rolls the engine back on its own if the container is"
+          echo "unhealthy, so check Caddy and DNS first."
+          exit 1
