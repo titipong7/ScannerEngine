@@ -2,7 +2,7 @@
 create table if not exists public.scan_results (
     id          bigint generated always as identity primary key,
     domain      text        not null,
-    scan_type   text        not null check (scan_type in ('dnssec', 'email')),
+    scan_type   text        not null check (scan_type in ('dnssec', 'email', 'tls')),
     status      text        not null check (status in ('pass', 'warn', 'fail', 'error')),
     summary     text,
     findings    jsonb       not null default '[]'::jsonb,

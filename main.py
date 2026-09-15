@@ -20,9 +20,10 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from app.config import Settings, get_settings
 from app.dns_client import build_resolver
-from app.schemas import ScanRequest, ScanResponse, ScanStatus, ScanType
+from app.schemas import ScanRequest, ScanResponse, ScanStatus, ScanType, TLSScanRequest
 from app.scanners import dnssec as dnssec_scanner
 from app.scanners import email_auth as email_scanner
+from app.scanners import tls as tls_scanner
 from app.storage import SupabaseRepository, get_repository
 
 logger = logging.getLogger("scanner_engine")
@@ -182,6 +183,29 @@ async def scan_email(payload: ScanRequest, settings: SettingsDep, repository: Re
         domain=payload.domain,
         scan_type=ScanType.EMAIL,
         scan_fn=email_scanner.scan,
+        settings=settings,
+        repository=repository,
+    )
+
+
+@app.post(
+    "/scan/tls",
+    response_model=ScanResponse,
+    tags=["scan"],
+    summary="Check the SSL/TLS configuration of a domain",
+    dependencies=[Depends(require_api_key)],
+)
+async def scan_tls(payload: TLSScanRequest, settings: SettingsDep, repository: RepositoryDep) -> ScanResponse:
+    """Validate the certificate chain, expiry, protocol versions and HSTS."""
+    return await run_scan(
+        domain=payload.domain,
+        scan_type=ScanType.TLS,
+        scan_fn=partial(
+            tls_scanner.scan,
+            port=payload.port,
+            timeout=settings.tls_timeout,
+            warn_days=settings.tls_expiry_warning_days,
+        ),
         settings=settings,
         repository=repository,
     )

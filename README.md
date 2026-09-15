@@ -11,6 +11,7 @@ app/schemas.py           Request/response models
 app/dns_client.py        Resolver construction + dnspython error mapping
 app/scanners/dnssec.py   DS / DNSKEY / RRSIG / AD-flag checks
 app/scanners/email_auth.py  SPF + DMARC lookup and grading
+app/scanners/tls.py      Certificate chain, expiry, protocol versions, HSTS
 app/storage.py           Supabase insert (best effort)
 supabase/schema.sql      Table DDL
 tests/                   Offline unit tests
@@ -23,6 +24,7 @@ tests/                   Offline unit tests
 | GET    | `/health`     | –                           | Liveness probe + Supabase status     |
 | POST   | `/scan/dns`   | `{"domain": "example.com"}` | DNSSEC chain-of-trust validation     |
 | POST   | `/scan/email` | `{"domain": "example.com"}` | SPF + DMARC validation               |
+| POST   | `/scan/tls`   | `{"domain": "example.com"}` | Certificate, protocols, HSTS (optional `"port": 443`) |
 | GET    | `/docs`       | –                           | Swagger UI                           |
 
 Every scan returns the same envelope:
@@ -70,6 +72,26 @@ specific reason, never silently as "not enabled".
   records (which are a permerror).
 * DMARC: a single `v=DMARC1` record at `_dmarc.<domain>`; `p=` policy strength,
   `pct<100`, missing `rua`, and an `sp=none` that undercuts the parent policy.
+
+### What the TLS scan checks
+
+* **Trust**: does the certificate verify against the system trust store the way
+  a browser would — expired, self-signed, wrong hostname, or a missing
+  intermediate all land here. When verification fails the scanner reconnects
+  without verification so it can still report *why*.
+* **Expiry**: `days_until_expiry` (negative once expired) with a `warn` inside
+  `TLS_EXPIRY_WARNING_DAYS` (default 30 — Let's Encrypt renews at 30 days left,
+  so anything under that is already late).
+* **Protocols**: each of TLS 1.0/1.1/1.2/1.3 is probed separately. Accepting
+  TLS 1.0 or 1.1 (deprecated by RFC 8996) is a `warn`; no TLS 1.2+ at all is a
+  `fail`. A probe that the *local* OpenSSL cannot perform reports `null`, not
+  `false` — the scanner does not claim a verdict it could not establish.
+* **Certificate hygiene**: key type and size, signature algorithm (MD5/SHA-1
+  fail), and a validity period over the 398 days browsers accept.
+* **HSTS**: the `Strict-Transport-Security` header and its `max-age`.
+
+Only the standard library plus `cryptography` (already needed for DNSSEC) is
+used — no openssl binary to shell out to.
 
 ## Supabase setup
 
@@ -165,5 +187,7 @@ pytest                         # offline unit tests
 | `DNS_TIMEOUT`     | `5.0`              | Per-query timeout (seconds)                    |
 | `DNS_LIFETIME`    | `10.0`             | Total time budget per query (seconds)          |
 | `DNSSEC_EXPIRY_WARNING_DAYS` | `14`    | Warn this many days before an RRSIG expires    |
+| `TLS_EXPIRY_WARNING_DAYS` | `30`       | Warn this many days before the certificate expires |
+| `TLS_TIMEOUT`     | `8.0`              | TLS connect/handshake timeout (seconds)        |
 | `API_KEY`         | – (disabled)       | When set, `X-API-Key` is required on `/scan/*` |
 | `LOG_LEVEL`       | `INFO`             | Python log level                               |

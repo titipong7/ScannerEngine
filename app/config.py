@@ -21,6 +21,12 @@ class Settings(BaseSettings):
     # Warn this many days before a DNSSEC signature expires.
     dnssec_expiry_warning_days: int = 14
 
+    # TLS
+    tls_timeout: float = 8.0
+    # Warn this many days before the certificate expires (Let's Encrypt renews
+    # at 30 days left, so anything under that is already late).
+    tls_expiry_warning_days: int = 30
+
     # API
     log_level: str = "INFO"
     api_key: str = ""

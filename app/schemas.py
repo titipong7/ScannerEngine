@@ -23,6 +23,7 @@ class ScanStatus(str, Enum):
 class ScanType(str, Enum):
     DNSSEC = "dnssec"
     EMAIL = "email"
+    TLS = "tls"
 
 
 class ScanRequest(BaseModel):
@@ -32,6 +33,10 @@ class ScanRequest(BaseModel):
     @classmethod
     def _clean(cls, value: str) -> str:
         return normalize_domain(value)
+
+
+class TLSScanRequest(ScanRequest):
+    port: int = Field(443, ge=1, le=65535, description="TLS port to connect to")
 
 
 class ScanResponse(BaseModel):

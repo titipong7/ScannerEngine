@@ -81,8 +81,10 @@
 - [x] Unit test แบบออฟไลน์ + `/health` probe
 - [ ] **DKIM** — ต้องรู้ selector ก่อน จึงควรให้ผู้ใช้กรอก selector เอง
       (หรือลองเดาจากชุดยอดนิยม: `google`, `selector1`, `selector2`, `k1`, `dkim`)
-- [ ] **SSL/TLS scan** — วันหมดอายุใบรับรอง, chain ครบไหม, TLS version,
-      cipher ที่อ่อน, HSTS (ใช้ `ssl` + `socket` ของ Python ไม่ต้องพึ่ง binary ภายนอก)
+- [x] **SSL/TLS scan** — `POST /scan/tls`: ตรวจ chain ว่า browser เชื่อถือไหม,
+      วันหมดอายุ (เตือนล่วงหน้า 30 วัน), TLS 1.0–1.3 ทีละเวอร์ชัน, ขนาดคีย์,
+      อัลกอริทึมลายเซ็น, อายุใบรับรองเกิน 398 วัน และ HSTS
+      (ใช้ `ssl` + `socket` + `cryptography` ไม่ต้องพึ่ง binary ภายนอก)
 - [ ] **Scoring** — รวมผลทุกโมดูลเป็นคะแนน 0–100 + เกรด A–F (ดูสัปดาห์ที่ 3)
 - [ ] Rate limiting ต่อ IP (กัน abuse ตอนเปิดสาธารณะ)
 - [ ] ถ้าจำนวนงานเริ่มเยอะค่อยเติม queue (Redis + arq) — ตอนนี้ยังไม่จำเป็น
@@ -117,6 +119,7 @@ DNSSEC ด้วย `dns.dnssec.validate()` ได้จริง ซึ่ง `
       **service-role key ต้องอยู่บนเซิร์ฟเวอร์เท่านั้น ห้ามหลุดไปฝั่ง browser เด็ดขาด**
 - [ ] สูตรคะแนน (เสนอเป็นจุดตั้งต้น):
       DNSSEC 30 + SPF 20 + DMARC 25 + DKIM 10 + TLS 15 = 100
+      (ตอนนี้มีข้อมูลครบแล้ว 3 โมดูล ขาดแค่ DKIM)
       โดย `pass` = เต็ม, `warn` = ครึ่ง, `fail`/`error` = 0
 - [ ] ตั้ง retention / cron ลบ `raw_data` เก่ากว่า 90 วัน (Supabase free tier 500 MB)
 
