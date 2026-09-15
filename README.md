@@ -12,6 +12,7 @@ app/dns_client.py        Resolver construction + dnspython error mapping
 app/scanners/dnssec.py   DS / DNSKEY / RRSIG / AD-flag checks
 app/scanners/email_auth.py  SPF + DMARC lookup and grading
 app/scanners/tls.py      Certificate chain, expiry, protocol versions, HSTS
+app/scanners/dkim.py     DKIM selector discovery and key inspection
 app/scoring.py           Weighted score + A-F grade
 app/storage.py           Supabase writes (best effort)
 supabase/schema.sql      Table DDL
@@ -27,6 +28,7 @@ web/                     Next.js dashboard (see web/README.md)
 | POST   | `/scan/dns`   | `{"domain": "example.com"}` | DNSSEC chain-of-trust validation     |
 | POST   | `/scan/email` | `{"domain": "example.com"}` | SPF + DMARC validation               |
 | POST   | `/scan/tls`   | `{"domain": "example.com"}` | Certificate, protocols, HSTS (optional `"port": 443`) |
+| POST   | `/scan/dkim`  | `{"domain": "example.com"}` | DKIM keys (optional `"selectors": ["google"]`) |
 | POST   | `/scan/full`  | `{"domain": "example.com"}` | All modules concurrently + a graded score |
 | GET    | `/docs`       | –                           | Swagger UI                           |
 
@@ -96,6 +98,32 @@ specific reason, never silently as "not enabled".
 Only the standard library plus `cryptography` (already needed for DNSSEC) is
 used — no openssl binary to shell out to.
 
+### What the DKIM scan checks
+
+DKIM is the awkward one: **a domain's selectors cannot be enumerated over DNS.**
+A key lives at `<selector>._domainkey.<domain>` and nothing lists which selectors
+exist, so the scanner has two modes and they mean different things:
+
+* **You name the selectors** (`"selectors": ["google", "selector1"]`) — then a
+  missing key is a real `fail`.
+* **You don't** — the scanner sweeps ~22 selectors the major providers use. A
+  hit is reported with the caveat that other selectors may also be in use; a
+  miss is reported as `error`, never `fail`, because not finding a guessed key
+  proves nothing. Scoring then drops DKIM from the denominator instead of
+  punishing the domain for a key we could not locate.
+
+Once a key is found: the `p=` tag is base64-decoded and parsed as a real public
+key (RSA under 2048 bits warns, under 1024 fails; Ed25519 and EC are accepted),
+an empty `p=` is reported as the revocation it is, and `t=y` testing mode warns
+because receivers are told to ignore the result.
+
+A wildcard at `*._domainkey` makes *every* selector resolve, so a sentinel
+lookup for a random selector runs first — otherwise a sweep against such a
+domain reports 22 phantom "discoveries" of the same record.
+
+Probes get a shorter DNS budget (4s) than a query whose answer we actually need,
+so one slow negative cannot dominate a `/scan/full`.
+
 ## Scoring
 
 `/scan/full` runs every module concurrently (so the request costs about as long
@@ -107,7 +135,7 @@ as the slowest module, not the sum) and grades the result:
 | DMARC | 25 | `/scan/email` → `raw_data.dmarc.status` |
 | SPF | 20 | `/scan/email` → `raw_data.spf.status` |
 | SSL/TLS | 15 | `/scan/tls` |
-| DKIM | 10 | not implemented yet |
+| DKIM | 10 | `/scan/dkim` |
 
 `pass` earns full credit, `warn` half, `fail` none. Three properties are worth
 keeping if you change `app/scoring.py`:
@@ -117,8 +145,9 @@ keeping if you change `app/scoring.py`:
   weights renormalised, so the score always reads "out of what we could check".
   `coverage` reports how much of the model that was — a 100 at `coverage: 0.45`
   is not the same claim as a 100 at `1.0`.
-* **DKIM's absence is handled by the same rule**, so no placeholder zeros drag
-  every domain down to 90.
+* **A module that could not run is handled by the same rule**, so no placeholder
+  zeros drag a domain down. DKIM leans on this hardest: a guessed-selector miss
+  reports `error`, so a domain is never marked down for a key we could not find.
 * **SPF and DMARC are scored separately**, because getting one right and the
   other wrong is the common case.
 

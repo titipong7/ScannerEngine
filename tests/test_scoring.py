@@ -92,3 +92,32 @@ def test_grade_boundaries(value, expected):
 
 def test_status_enum_is_accepted_as_well_as_its_string():
     assert score({"tls": {"status": ScanStatus.PASS}})["score"] == 100
+
+
+def test_dkim_is_scored_when_present():
+    result = score(
+        {
+            "dnssec": {"status": "pass"},
+            "tls": {"status": "pass"},
+            "dkim": {"status": "pass"},
+            "email": email_result("pass", "pass", overall="pass"),
+        }
+    )
+    assert result["score"] == 100
+    assert result["available_weight"] == 100
+    assert result["coverage"] == 1.0
+
+
+def test_undeterminable_dkim_does_not_cap_the_score():
+    """A guessed-selector miss reports `error`; that must not cost the domain points."""
+    result = score(
+        {
+            "dnssec": {"status": "pass"},
+            "tls": {"status": "pass"},
+            "dkim": {"status": "error"},
+            "email": email_result("pass", "pass", overall="pass"),
+        }
+    )
+    assert result["score"] == 100
+    assert result["undetermined"] == ["dkim"]
+    assert result["coverage"] == pytest.approx(0.9, abs=0.001)

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import re
 from datetime import datetime
 from enum import Enum
 from typing import Any
@@ -24,6 +25,7 @@ class ScanType(str, Enum):
     DNSSEC = "dnssec"
     EMAIL = "email"
     TLS = "tls"
+    DKIM = "dkim"
 
 
 class ScanRequest(BaseModel):
@@ -33,6 +35,29 @@ class ScanRequest(BaseModel):
     @classmethod
     def _clean(cls, value: str) -> str:
         return normalize_domain(value)
+
+
+class DKIMScanRequest(ScanRequest):
+    selectors: list[str] | None = Field(
+        None,
+        max_length=10,
+        description=(
+            "Selectors to check, e.g. ['google']. DKIM selectors cannot be enumerated "
+            "over DNS, so naming them is the only way a missing key counts as a failure "
+            "rather than as 'not found'."
+        ),
+    )
+
+    @field_validator("selectors")
+    @classmethod
+    def _clean_selectors(cls, value: list[str] | None) -> list[str] | None:
+        if not value:
+            return None
+        cleaned = [s.strip().lower().rstrip(".") for s in value if s and s.strip()]
+        for selector in cleaned:
+            if not re.fullmatch(r"[a-z0-9_-]+(\.[a-z0-9_-]+)*", selector):
+                raise ValueError(f"'{selector}' is not a valid DKIM selector")
+        return cleaned or None
 
 
 class TLSScanRequest(ScanRequest):

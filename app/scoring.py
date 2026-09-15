@@ -13,8 +13,10 @@ Design decisions worth knowing before you change the weights:
   not know. Components we could not determine are dropped and the remaining
   weights are renormalised, so the score always means "out of what we could
   actually check". `coverage` reports how much of the total weight that was.
-* **Modules that do not exist yet** (DKIM) are simply absent from the input,
-  which the same renormalisation handles — no placeholder zeros.
+* **A module that could not run** is simply absent from the input, which the
+  same renormalisation handles — no placeholder zeros. DKIM leans on this
+  heavily: when its selector could only be guessed, it reports `error` rather
+  than claiming the domain has no key.
 """
 
 from __future__ import annotations
@@ -105,6 +107,9 @@ def components_from_results(results: dict[str, dict[str, Any]]) -> list[Componen
 
     if "tls" in results:
         statuses["tls"] = _as_status(results["tls"].get("status"))
+
+    if "dkim" in results:
+        statuses["dkim"] = _as_status(results["dkim"].get("status"))
 
     if "email" in results:
         raw = results["email"].get("raw_data") or {}

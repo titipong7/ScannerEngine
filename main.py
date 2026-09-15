@@ -24,6 +24,7 @@ from app.config import Settings, get_settings
 from app.dns_client import build_resolver
 from app import scoring
 from app.schemas import (
+    DKIMScanRequest,
     FullScanResponse,
     ScanRequest,
     ScanResponse,
@@ -32,6 +33,7 @@ from app.schemas import (
     ScoreBreakdown,
     TLSScanRequest,
 )
+from app.scanners import dkim as dkim_scanner
 from app.scanners import dnssec as dnssec_scanner
 from app.scanners import email_auth as email_scanner
 from app.scanners import tls as tls_scanner
@@ -249,6 +251,30 @@ async def scan_tls(payload: TLSScanRequest, settings: SettingsDep, repository: R
 
 
 @app.post(
+    "/scan/dkim",
+    response_model=ScanResponse,
+    tags=["scan"],
+    summary="Look for DKIM keys",
+    dependencies=[Depends(require_api_key)],
+)
+async def scan_dkim(payload: DKIMScanRequest, settings: SettingsDep, repository: RepositoryDep) -> ScanResponse:
+    """Find and grade DKIM public keys.
+
+    DKIM selectors cannot be listed over DNS. Without `selectors` the scanner
+    guesses from the names common providers use, and a miss is reported as
+    `error` (undeterminable) rather than `fail` — not finding a guessed key
+    proves nothing. Name the selectors and a missing key becomes a real failure.
+    """
+    return await run_scan(
+        domain=payload.domain,
+        scan_type=ScanType.DKIM,
+        scan_fn=partial(dkim_scanner.scan, selectors=payload.selectors),
+        settings=settings,
+        repository=repository,
+    )
+
+
+@app.post(
     "/scan/full",
     response_model=FullScanResponse,
     tags=["scan"],
@@ -256,10 +282,11 @@ async def scan_tls(payload: TLSScanRequest, settings: SettingsDep, repository: R
     dependencies=[Depends(require_api_key)],
 )
 async def scan_full(payload: ScanRequest, settings: SettingsDep, repository: RepositoryDep) -> FullScanResponse:
-    """Run DNSSEC, email and TLS together, score the result and store it.
+    """Run DNSSEC, email, DKIM and TLS together, score the result and store it.
 
-    The three modules are independent network work, so they run concurrently —
-    the whole scan costs about as long as its slowest module rather than the sum.
+    The modules are independent network work, so they run concurrently — the whole
+    scan costs about as long as its slowest module rather than the sum. DKIM runs
+    with guessed selectors here; call /scan/dkim directly to name your own.
     """
     started = time.perf_counter()
 
@@ -275,6 +302,12 @@ async def scan_full(payload: ScanRequest, settings: SettingsDep, repository: Rep
             domain=payload.domain,
             scan_type=ScanType.EMAIL,
             scan_fn=email_scanner.scan,
+            settings=settings,
+        ),
+        execute_scan(
+            domain=payload.domain,
+            scan_type=ScanType.DKIM,
+            scan_fn=dkim_scanner.scan,
             settings=settings,
         ),
         execute_scan(
