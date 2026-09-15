@@ -16,6 +16,7 @@ app/scoring.py           Weighted score + A-F grade
 app/storage.py           Supabase writes (best effort)
 supabase/schema.sql      Table DDL
 tests/                   Offline unit tests
+web/                     Next.js dashboard (see web/README.md)
 ```
 
 ## Endpoints
@@ -215,6 +216,17 @@ Notes:
   Then add an ingress rule for TCP 8000 to the subnet's security list.
 * Put a reverse proxy (Caddy/nginx) in front for TLS before exposing this
   publicly, and set `API_KEY` in `.env` so callers must send `X-API-Key`.
+
+## Dashboard
+
+`web/` is a Next.js App Router front end: one input, one scan, one graded score.
+The browser posts to a Route Handler that holds `SCANNER_API_KEY` server-side and
+calls `/scan/full` — the credential never reaches the client. See
+[`web/README.md`](web/README.md) for local setup and the Vercel deployment.
+
+```bash
+cd web && npm install && cp .env.example .env.local && npm run dev
+```
 
 ## Local development
 

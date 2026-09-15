@@ -1,0 +1,83 @@
+@import "tailwindcss";
+
+/*
+ * Design tokens.
+ *
+ * Status colours are the reserved status palette and are never reused for
+ * anything decorative. They are only ever applied to *marks* (the dial arc, a
+ * pill's dot) — text always wears an ink token, and every status is spelled out
+ * with an icon and a word, so colour never carries the meaning on its own.
+ * Dark mode is a selected set of steps, not an automatic inversion; it is
+ * declared under both the OS media query and an explicit [data-theme] stamp.
+ */
+:root {
+  color-scheme: light;
+
+  --surface-1: #fcfcfb;
+  --surface-page: #f9f9f7;
+  --text-primary: #0b0b0b;
+  --text-secondary: #52514e;
+  --text-muted: #898781;
+  --hairline: #e1e0d9;
+
+  --status-good: #0ca30c;
+  --status-warning: #fab219;
+  --status-serious: #ec835a;
+  --status-critical: #d03b3b;
+  --status-unknown: #898781;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    color-scheme: dark;
+
+    --surface-1: #1a1a19;
+    --surface-page: #0d0d0d;
+    --text-primary: #ffffff;
+    --text-secondary: #c3c2b7;
+    --text-muted: #898781;
+    --hairline: #2c2c2a;
+  }
+}
+
+:root[data-theme="dark"] {
+  color-scheme: dark;
+
+  --surface-1: #1a1a19;
+  --surface-page: #0d0d0d;
+  --text-primary: #ffffff;
+  --text-secondary: #c3c2b7;
+  --text-muted: #898781;
+  --hairline: #2c2c2a;
+}
+
+body {
+  background: var(--surface-page);
+  color: var(--text-primary);
+  font-family: ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
+  -webkit-font-smoothing: antialiased;
+}
+
+.surface {
+  background: var(--surface-1);
+  border: 1px solid var(--hairline);
+}
+
+.ink-secondary {
+  color: var(--text-secondary);
+}
+
+.ink-muted {
+  color: var(--text-muted);
+}
+
+/* The gauge sweeps from empty to its value once, on mount. */
+@media (prefers-reduced-motion: no-preference) {
+  .dial-arc {
+    transition: stroke-dashoffset 900ms cubic-bezier(0.2, 0.7, 0.3, 1);
+  }
+}
+
+.mono {
+  font-family: ui-monospace, "SF Mono", "JetBrains Mono", Menlo, monospace;
+}
