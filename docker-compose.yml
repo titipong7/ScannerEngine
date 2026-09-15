@@ -1,0 +1,27 @@
+services:
+  scanner-engine:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: scanner-engine:latest
+    container_name: scanner-engine
+    platform: linux/arm64      # remove this line to build natively on x86_64
+    restart: unless-stopped
+    env_file:
+      - .env
+    ports:
+      - "8000:8000"
+    # Public resolvers are required; the container must reach UDP/TCP 53 outbound.
+    dns:
+      - 1.1.1.1
+      - 8.8.8.8
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://127.0.0.1:8000/health"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+    deploy:
+      resources:
+        limits:
+          memory: 512M
