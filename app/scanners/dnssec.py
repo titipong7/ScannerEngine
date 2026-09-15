@@ -35,6 +35,11 @@ logger = logging.getLogger(__name__)
 # KSKs (the keys a DS can point at) carry the Secure Entry Point flag.
 _SEP_FLAG = 0x0001
 
+# An expired RRSIG takes the whole zone offline for every validating resolver,
+# so the default warning window is deliberately wider than a typical 7-day
+# re-signing cycle: two weeks leaves room to notice and act.
+DEFAULT_EXPIRY_WARNING_DAYS = 14
+
 
 def _serialize_ds(rdata: Any) -> dict[str, Any]:
     return {
@@ -56,8 +61,9 @@ def _serialize_dnskey(rdata: Any) -> dict[str, Any]:
     }
 
 
-def _serialize_rrsig(rdata: Any) -> dict[str, Any]:
+def _serialize_rrsig(rdata: Any, now: dt.datetime) -> dict[str, Any]:
     to_utc = dt.datetime.fromtimestamp
+    expiration = to_utc(rdata.expiration, dt.timezone.utc)
     return {
         "type_covered": dns.rdatatype.to_text(rdata.type_covered),
         "key_tag": rdata.key_tag,
@@ -65,8 +71,10 @@ def _serialize_rrsig(rdata: Any) -> dict[str, Any]:
         "algorithm": int(rdata.algorithm),
         "algorithm_name": dns.dnssec.algorithm_to_text(rdata.algorithm),
         "inception": to_utc(rdata.inception, dt.timezone.utc).isoformat(),
-        "expiration": to_utc(rdata.expiration, dt.timezone.utc).isoformat(),
-        "expired": rdata.expiration < dt.datetime.now(dt.timezone.utc).timestamp(),
+        "expiration": expiration.isoformat(),
+        "expired": expiration <= now,
+        # Negative once expired; the dashboard can render "expires in N days".
+        "days_until_expiry": round((expiration - now).total_seconds() / 86400, 1),
     }
 
 
@@ -83,9 +91,20 @@ def _find_rrsets(response: dns.message.Message, name: dns.name.Name) -> tuple[An
     return dnskey_rrset, rrsig_rrset
 
 
-def scan(domain: str, resolver: dns.resolver.Resolver) -> tuple[ScanStatus, str, list[str], dict[str, Any]]:
-    """Return (status, summary, findings, raw_data) for the DNSSEC posture."""
+def scan(
+    domain: str,
+    resolver: dns.resolver.Resolver,
+    *,
+    warn_days: int = DEFAULT_EXPIRY_WARNING_DAYS,
+) -> tuple[ScanStatus, str, list[str], dict[str, Any]]:
+    """Return (status, summary, findings, raw_data) for the DNSSEC posture.
+
+    `warn_days` is how far ahead an upcoming RRSIG expiry is still worth warning
+    about — the point is to raise the alarm *before* the zone goes dark, not to
+    report it afterwards.
+    """
     name = dns.name.from_text(domain)
+    now = dt.datetime.now(dt.timezone.utc)
     findings: list[str] = []
     raw: dict[str, Any] = {
         "domain": domain,
@@ -100,7 +119,10 @@ def scan(domain: str, resolver: dns.resolver.Resolver) -> tuple[ScanStatus, str,
             "rrsig_valid": False,
             "ds_matches_dnskey": False,
             "ad_flag": False,
+            "rrsig_expires_soon": False,
         },
+        "expiry_warning_days": warn_days,
+        "min_days_until_expiry": None,
         "errors": [],
     }
     checks = raw["checks"]
@@ -140,7 +162,8 @@ def scan(domain: str, resolver: dns.resolver.Resolver) -> tuple[ScanStatus, str,
         raw["dnskey_records"] = [_serialize_dnskey(r) for r in dnskey_rrset]
     if rrsig_rrset is not None:
         checks["rrsig_present"] = True
-        raw["rrsig_records"] = [_serialize_rrsig(r) for r in rrsig_rrset]
+        raw["rrsig_records"] = [_serialize_rrsig(r, now) for r in rrsig_rrset]
+        raw["min_days_until_expiry"] = min(r["days_until_expiry"] for r in raw["rrsig_records"])
 
     # Unsigned zone: nothing else to check.
     if not checks["dnskey_present"]:
@@ -168,6 +191,17 @@ def scan(domain: str, resolver: dns.resolver.Resolver) -> tuple[ScanStatus, str,
             findings.append(
                 f"{len(expired)} RRSIG record(s) covering DNSKEY have expired — resolvers will SERVFAIL."
             )
+        else:
+            expiring_soon = [r for r in raw["rrsig_records"] if r["days_until_expiry"] <= warn_days]
+            if expiring_soon:
+                checks["rrsig_expires_soon"] = True
+                soonest = min(r["days_until_expiry"] for r in expiring_soon)
+                findings.append(
+                    f"{len(expiring_soon)} RRSIG record(s) covering DNSKEY expire in "
+                    f"{soonest:g} day(s) (on {min(expiring_soon, key=lambda r: r['days_until_expiry'])['expiration']}). "
+                    "If they are not re-signed before then, every validating resolver will "
+                    "SERVFAIL and the whole domain goes dark."
+                )
 
     # 4. Does a DS digest actually match one of the published keys? -----------
     if ds_rdatas and dnskey_rrset is not None:
@@ -204,6 +238,14 @@ def scan(domain: str, resolver: dns.resolver.Resolver) -> tuple[ScanStatus, str,
          checks["rrsig_valid"], checks["ds_matches_dnskey"], checks["ad_flag"])
     )
     if fully_valid:
+        if checks["rrsig_expires_soon"]:
+            days = raw["min_days_until_expiry"]
+            return (
+                ScanStatus.WARN,
+                f"DNSSEC validates, but a signature expires in {days:g} day(s).",
+                findings,
+                raw,
+            )
         return ScanStatus.PASS, "DNSSEC is enabled and the chain of trust validates.", findings, raw
 
     if checks["ds_present"] or checks["rrsig_present"]:

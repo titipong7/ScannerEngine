@@ -77,6 +77,7 @@
 - [x] จัดการ error: NXDOMAIN / timeout / SERVFAIL แปลงเป็น response ที่อ่านรู้เรื่อง
       ไม่ใช่ 500
 - [x] Containerize สำหรับ ARM64 (two-stage build, non-root, healthcheck)
+- [x] เตือนล่วงหน้าเมื่อ RRSIG ใกล้หมดอายุ (ค่าเริ่มต้น 14 วัน → `warn`)
 - [x] Unit test แบบออฟไลน์ + `/health` probe
 - [ ] **DKIM** — ต้องรู้ selector ก่อน จึงควรให้ผู้ใช้กรอก selector เอง
       (หรือลองเดาจากชุดยอดนิยม: `google`, `selector1`, `selector2`, `k1`, `dkim`)

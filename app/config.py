@@ -18,6 +18,8 @@ class Settings(BaseSettings):
     dns_resolvers: str = "1.1.1.1,8.8.8.8"
     dns_timeout: float = 5.0
     dns_lifetime: float = 10.0
+    # Warn this many days before a DNSSEC signature expires.
+    dnssec_expiry_warning_days: int = 14
 
     # API
     log_level: str = "INFO"

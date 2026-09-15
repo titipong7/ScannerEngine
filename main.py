@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import logging
 from contextlib import asynccontextmanager
+from functools import partial
 from datetime import datetime, timezone
 from typing import Annotated, Any, Callable
 
@@ -153,11 +154,15 @@ async def health(settings: SettingsDep, repository: RepositoryDep) -> dict[str, 
     dependencies=[Depends(require_api_key)],
 )
 async def scan_dns(payload: ScanRequest, settings: SettingsDep, repository: RepositoryDep) -> ScanResponse:
-    """Validate that DS, DNSKEY and RRSIG records exist and form a valid chain of trust."""
+    """Validate that DS, DNSKEY and RRSIG records exist and form a valid chain of trust.
+
+    Also warns when a signature is close to expiring, since an expired RRSIG takes
+    the entire domain offline for validating resolvers.
+    """
     return await run_scan(
         domain=payload.domain,
         scan_type=ScanType.DNSSEC,
-        scan_fn=dnssec_scanner.scan,
+        scan_fn=partial(dnssec_scanner.scan, warn_days=settings.dnssec_expiry_warning_days),
         settings=settings,
         repository=repository,
         want_dnssec=True,

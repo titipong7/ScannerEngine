@@ -50,7 +50,12 @@ NXDOMAIN, timeout, dead nameserver).
 1. **DS** record exists in the parent zone (the delegation is signed).
 2. **DNSKEY** RRset exists at the apex.
 3. **RRSIG** covering the DNSKEY RRset exists, is not expired, and verifies
-   cryptographically against those keys (`dns.dnssec.validate`).
+   cryptographically against those keys (`dns.dnssec.validate`). A signature
+   that is still valid but expires within `DNSSEC_EXPIRY_WARNING_DAYS`
+   (default 14) downgrades the result to `warn` — an expired RRSIG takes the
+   whole domain offline for every validating resolver, so the alarm has to come
+   *before* that happens, not after. `raw_data.min_days_until_expiry` carries
+   the countdown for the dashboard.
 4. At least one DS digest **matches** a published DNSKEY — this catches the
    common "stale DS at the registrar after a key rollover" breakage.
 5. The validating resolver set the **AD** flag on the response.
@@ -159,5 +164,6 @@ pytest                         # offline unit tests
 | `DNS_RESOLVERS`   | `1.1.1.1,8.8.8.8`  | Comma-separated validating resolvers           |
 | `DNS_TIMEOUT`     | `5.0`              | Per-query timeout (seconds)                    |
 | `DNS_LIFETIME`    | `10.0`             | Total time budget per query (seconds)          |
+| `DNSSEC_EXPIRY_WARNING_DAYS` | `14`    | Warn this many days before an RRSIG expires    |
 | `API_KEY`         | – (disabled)       | When set, `X-API-Key` is required on `/scan/*` |
 | `LOG_LEVEL`       | `INFO`             | Python log level                               |
