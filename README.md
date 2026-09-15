@@ -12,7 +12,8 @@ app/dns_client.py        Resolver construction + dnspython error mapping
 app/scanners/dnssec.py   DS / DNSKEY / RRSIG / AD-flag checks
 app/scanners/email_auth.py  SPF + DMARC lookup and grading
 app/scanners/tls.py      Certificate chain, expiry, protocol versions, HSTS
-app/storage.py           Supabase insert (best effort)
+app/scoring.py           Weighted score + A-F grade
+app/storage.py           Supabase writes (best effort)
 supabase/schema.sql      Table DDL
 tests/                   Offline unit tests
 ```
@@ -25,6 +26,7 @@ tests/                   Offline unit tests
 | POST   | `/scan/dns`   | `{"domain": "example.com"}` | DNSSEC chain-of-trust validation     |
 | POST   | `/scan/email` | `{"domain": "example.com"}` | SPF + DMARC validation               |
 | POST   | `/scan/tls`   | `{"domain": "example.com"}` | Certificate, protocols, HSTS (optional `"port": 443`) |
+| POST   | `/scan/full`  | `{"domain": "example.com"}` | All modules concurrently + a graded score |
 | GET    | `/docs`       | –                           | Swagger UI                           |
 
 Every scan returns the same envelope:
@@ -93,22 +95,71 @@ specific reason, never silently as "not enabled".
 Only the standard library plus `cryptography` (already needed for DNSSEC) is
 used — no openssl binary to shell out to.
 
+## Scoring
+
+`/scan/full` runs every module concurrently (so the request costs about as long
+as the slowest module, not the sum) and grades the result:
+
+| Component | Weight | Source |
+|---|---|---|
+| DNSSEC | 30 | `/scan/dns` |
+| DMARC | 25 | `/scan/email` → `raw_data.dmarc.status` |
+| SPF | 20 | `/scan/email` → `raw_data.spf.status` |
+| SSL/TLS | 15 | `/scan/tls` |
+| DKIM | 10 | not implemented yet |
+
+`pass` earns full credit, `warn` half, `fail` none. Three properties are worth
+keeping if you change `app/scoring.py`:
+
+* **`error` is not zero.** A DNS timeout means we do not know, not that the
+  domain is broken. Undeterminable components are dropped and the remaining
+  weights renormalised, so the score always reads "out of what we could check".
+  `coverage` reports how much of the model that was — a 100 at `coverage: 0.45`
+  is not the same claim as a 100 at `1.0`.
+* **DKIM's absence is handled by the same rule**, so no placeholder zeros drag
+  every domain down to 90.
+* **SPF and DMARC are scored separately**, because getting one right and the
+  other wrong is the common case.
+
+Grades: A ≥ 90, B ≥ 80, C ≥ 70, D ≥ 60, F below.
+
+```json
+{
+  "domain": "example.com",
+  "duration_ms": 272,
+  "score": {
+    "score": 78, "grade": "C", "coverage": 0.9,
+    "earned_weight": 70.0, "available_weight": 90, "total_weight": 100,
+    "components": [
+      {"key": "dnssec", "label": "DNSSEC", "status": "pass", "weight": 30, "credit": 1.0, "points": 30.0},
+      {"key": "dmarc",  "label": "DMARC",  "status": "warn", "weight": 25, "credit": 0.5, "points": 12.5}
+    ],
+    "undetermined": []
+  },
+  "modules": [ "...one ScanResponse per module..." ],
+  "scan_id": 42
+}
+```
+
 ## Supabase setup
 
-Run `supabase/schema.sql` in the SQL editor:
+Run `supabase/schema.sql` in the SQL editor. It is idempotent, and it upgrades
+a database that only had the original `scan_results` table.
 
-```sql
-create table if not exists public.scan_results (
-    id bigint generated always as identity primary key,
-    domain text not null,
-    scan_type text not null,
-    status text not null,
-    summary text,
-    findings jsonb not null default '[]'::jsonb,
-    raw_data jsonb not null default '{}'::jsonb,
-    created_at timestamptz not null default now()
-);
-```
+| Table | Holds |
+|---|---|
+| `profiles` | one row per auth user (plan, quota), created by a trigger on signup |
+| `domains` | the domains a user watches |
+| `scans` | one row per "the user pressed Scan" — ties the modules together |
+| `scan_results` | raw per-module output, `scan_id` links it to the scan |
+| `scores` | the graded breakdown per scan, for plotting history |
+| `latest_scores` | view: the newest score per domain |
+
+RLS is enabled on every table and denies by default; a signed-in user reads only
+rows where `user_id = auth.uid()`. The engine connects with the **service-role
+key**, which bypasses RLS — that key must never reach a browser. Anonymous scans
+(`user_id is null`) are readable through the API by nobody; the dashboard shows
+them from the scan response itself.
 
 Copy `.env.example` to `.env` and fill in `SUPABASE_URL` and `SUPABASE_KEY`
 (use the **service-role** key — it is server-side only and bypasses RLS).

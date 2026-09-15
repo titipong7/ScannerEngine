@@ -39,6 +39,27 @@ class TLSScanRequest(ScanRequest):
     port: int = Field(443, ge=1, le=65535, description="TLS port to connect to")
 
 
+class ComponentScore(BaseModel):
+    key: str
+    label: str
+    status: ScanStatus
+    weight: int
+    credit: float | None = Field(None, description="1.0 pass, 0.5 warn, 0.0 fail, null undetermined")
+    points: float
+
+
+class ScoreBreakdown(BaseModel):
+    score: int | None = Field(None, ge=0, le=100)
+    grade: str | None = None
+    coverage: float = Field(0.0, description="Share of the scoring model we could evaluate")
+    earned_weight: float = 0.0
+    available_weight: int = 0
+    total_weight: int = 0
+    components: list[ComponentScore] = Field(default_factory=list)
+    undetermined: list[str] = Field(default_factory=list)
+    note: str | None = None
+
+
 class ScanResponse(BaseModel):
     domain: str
     scan_type: ScanType
@@ -49,3 +70,15 @@ class ScanResponse(BaseModel):
     scanned_at: datetime
     persisted: bool = False
     record_id: str | int | None = None
+
+
+class FullScanResponse(BaseModel):
+    """Every module plus the combined score, from one request."""
+
+    domain: str
+    scanned_at: datetime
+    duration_ms: int
+    score: ScoreBreakdown
+    modules: list[ScanResponse]
+    scan_id: str | int | None = None
+    persisted: bool = False

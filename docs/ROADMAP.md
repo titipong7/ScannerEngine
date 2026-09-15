@@ -85,7 +85,8 @@
       วันหมดอายุ (เตือนล่วงหน้า 30 วัน), TLS 1.0–1.3 ทีละเวอร์ชัน, ขนาดคีย์,
       อัลกอริทึมลายเซ็น, อายุใบรับรองเกิน 398 วัน และ HSTS
       (ใช้ `ssl` + `socket` + `cryptography` ไม่ต้องพึ่ง binary ภายนอก)
-- [ ] **Scoring** — รวมผลทุกโมดูลเป็นคะแนน 0–100 + เกรด A–F (ดูสัปดาห์ที่ 3)
+- [x] **Scoring** — `POST /scan/full` รันทุกโมดูลพร้อมกันแล้วให้คะแนน 0–100 + เกรด A–F
+      (`app/scoring.py`; `error` ไม่นับเป็น 0 แต่ตัดออกจากตัวหารแล้วรายงาน `coverage`)
 - [ ] Rate limiting ต่อ IP (กัน abuse ตอนเปิดสาธารณะ)
 - [ ] ถ้าจำนวนงานเริ่มเยอะค่อยเติม queue (Redis + arq) — ตอนนี้ยังไม่จำเป็น
       เพราะสแกน 1 ครั้งใช้เวลาไม่ถึง 2 วินาที
@@ -103,7 +104,7 @@ DNSSEC ด้วย `dns.dnssec.validate()` ได้จริง ซึ่ง `
 - [x] ตาราง `scan_results` (domain, scan_type, status, summary, findings, raw_data, created_at)
 - [x] เชื่อม Scanner → Supabase ด้วย service-role key (เขียนแบบ best effort:
       ถ้า Supabase ล่ม การสแกนยังคืนผลได้ แค่ `persisted: false`)
-- [ ] ขยาย schema ให้รองรับผู้ใช้และประวัติ:
+- [x] ขยาย schema ให้รองรับผู้ใช้และประวัติ (`supabase/schema.sql` รันซ้ำได้):
 
   | ตาราง | ใช้ทำอะไร |
   |---|---|
@@ -113,11 +114,11 @@ DNSSEC ด้วย `dns.dnssec.validate()` ได้จริง ซึ่ง `
   | `scan_results` | ผลดิบรายโมดูล (มีอยู่แล้ว เพิ่ม `scan_id` FK) |
   | `scores` | คะแนนรวมต่อครั้ง เอาไว้พล็อตกราฟย้อนหลัง |
 
-- [ ] **RLS policy** — จุดนี้พลาดง่ายและอันตรายที่สุด:
+- [x] **RLS policy** — เปิดครบทุกตาราง deny by default:
       เปิด RLS ทุกตาราง, ให้ผู้ใช้อ่านได้เฉพาะแถวที่ `user_id = auth.uid()`,
       ส่วน Scanner ใช้ service-role key ซึ่ง bypass RLS อยู่แล้ว
       **service-role key ต้องอยู่บนเซิร์ฟเวอร์เท่านั้น ห้ามหลุดไปฝั่ง browser เด็ดขาด**
-- [ ] สูตรคะแนน (เสนอเป็นจุดตั้งต้น):
+- [x] สูตรคะแนน:
       DNSSEC 30 + SPF 20 + DMARC 25 + DKIM 10 + TLS 15 = 100
       (ตอนนี้มีข้อมูลครบแล้ว 3 โมดูล ขาดแค่ DKIM)
       โดย `pass` = เต็ม, `warn` = ครึ่ง, `fail`/`error` = 0

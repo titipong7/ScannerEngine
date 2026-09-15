@@ -4,9 +4,11 @@ The client is created lazily and shared. Persistence is deliberately
 *best effort*: a Supabase outage degrades the engine to a read-only scanner
 instead of failing the caller's request.
 
-Expected table (see README for the full DDL):
+Tables it writes to (full DDL in `supabase/schema.sql`):
 
-    scan_results(id, domain, scan_type, status, summary, findings, raw_data, created_at)
+    scans(id, domain, user_id, trigger, score, grade, duration_ms, created_at)
+    scan_results(id, scan_id, domain, scan_type, status, summary, findings, raw_data, ...)
+    scores(id, scan_id, domain, score, grade, coverage, breakdown, created_at)
 """
 
 from __future__ import annotations
@@ -34,6 +36,75 @@ class SupabaseRepository:
     def enabled(self) -> bool:
         return self._client is not None
 
+    def _insert(self, table: str, payload: dict[str, Any], *, context: str) -> str | int | None:
+        """Insert one row and return its id, or None if it could not be stored."""
+        if self._client is None:
+            return None
+        try:
+            response = self._client.table(table).insert(payload).execute()
+        except Exception:  # network error, RLS denial, schema mismatch, ...
+            logger.exception("Failed to store %s in Supabase", context)
+            return None
+
+        rows = getattr(response, "data", None) or []
+        return rows[0].get("id") if rows else None
+
+    def create_scan(
+        self,
+        *,
+        domain: str,
+        trigger: str = "manual",
+        user_id: str | None = None,
+    ) -> str | int | None:
+        """Open a scan row that the per-module results will hang off."""
+        payload: dict[str, Any] = {"domain": domain, "trigger": trigger}
+        if user_id:
+            payload["user_id"] = user_id
+        return self._insert("scans", payload, context=f"scan for {domain}")
+
+    def finish_scan(
+        self,
+        scan_id: str | int,
+        *,
+        score: int | None,
+        grade: str | None,
+        duration_ms: int,
+    ) -> bool:
+        """Write the final score back onto the scan row."""
+        if self._client is None:
+            return False
+        try:
+            self._client.table("scans").update(
+                {"score": score, "grade": grade, "duration_ms": duration_ms}
+            ).eq("id", scan_id).execute()
+        except Exception:
+            logger.exception("Failed to finalise scan %s in Supabase", scan_id)
+            return False
+        return True
+
+    def insert_score(
+        self,
+        *,
+        scan_id: str | int,
+        domain: str,
+        score: int,
+        grade: str,
+        coverage: float,
+        breakdown: list[dict[str, Any]],
+        user_id: str | None = None,
+    ) -> str | int | None:
+        payload: dict[str, Any] = {
+            "scan_id": scan_id,
+            "domain": domain,
+            "score": score,
+            "grade": grade,
+            "coverage": coverage,
+            "breakdown": breakdown,
+        }
+        if user_id:
+            payload["user_id"] = user_id
+        return self._insert("scores", payload, context=f"score for {domain}")
+
     def insert_scan_result(
         self,
         *,
@@ -44,16 +115,15 @@ class SupabaseRepository:
         findings: list[str],
         raw_data: dict[str, Any],
         scanned_at: datetime,
+        scan_id: str | int | None = None,
+        user_id: str | None = None,
     ) -> str | int | None:
         """Insert one row; returns the new row id, or None if it was not stored.
 
         Never raises — storage problems are logged and reported to the caller
         through the `persisted` flag on the response.
         """
-        if self._client is None:
-            return None
-
-        payload = {
+        payload: dict[str, Any] = {
             "domain": domain,
             "scan_type": scan_type,
             "status": status,
@@ -62,14 +132,11 @@ class SupabaseRepository:
             "raw_data": raw_data,
             "created_at": scanned_at.isoformat(),
         }
-        try:
-            response = self._client.table(self._table).insert(payload).execute()
-        except Exception:  # network error, RLS denial, schema mismatch, ...
-            logger.exception("Failed to store %s scan for %s in Supabase", scan_type, domain)
-            return None
-
-        rows = getattr(response, "data", None) or []
-        return rows[0].get("id") if rows else None
+        if scan_id is not None:
+            payload["scan_id"] = scan_id
+        if user_id:
+            payload["user_id"] = user_id
+        return self._insert(self._table, payload, context=f"{scan_type} scan for {domain}")
 
 
 def _build_client(settings: Settings) -> Client | None:

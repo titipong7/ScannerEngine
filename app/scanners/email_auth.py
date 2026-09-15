@@ -194,6 +194,16 @@ def scan(domain: str, resolver: dns.resolver.Resolver) -> tuple[ScanStatus, str,
     raw: dict[str, Any] = {"domain": domain, "resolvers": list(resolver.nameservers)}
 
     spf_status, spf_findings = _check_spf(domain, resolver, raw)
+
+    # A domain that does not exist has no email posture to grade. Reporting
+    # "no DMARC record" here would score a typo as a misconfigured domain.
+    if raw["spf"].get("reason") == "nxdomain":
+        message = raw["spf"]["error"]
+        raw["dmarc"] = {"present": False, "reason": "nxdomain", "error": message,
+                        "status": ScanStatus.ERROR.value}
+        raw["spf"]["status"] = ScanStatus.ERROR.value
+        return ScanStatus.ERROR, message, [message], raw
+
     dmarc_status, dmarc_findings = _check_dmarc(domain, resolver, raw)
 
     raw["spf"]["status"] = spf_status.value

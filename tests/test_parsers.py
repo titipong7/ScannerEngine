@@ -49,3 +49,24 @@ def test_parse_dmarc_tags():
     assert parsed["aggregate_reports"] == ["mailto:a@example.com"]
     assert parsed["alignment_dkim"] == "s"
     assert parsed["alignment_spf"] == "r"  # default when unset
+
+
+def test_nxdomain_email_scan_is_undeterminable(monkeypatch):
+    """A domain that does not exist must not be graded as misconfigured."""
+    from app.dns_client import DNSLookupError
+    from app.scanners import email_auth
+
+    def boom(resolver, qname):
+        raise DNSLookupError("nxdomain", f"Domain '{qname}' does not exist (NXDOMAIN)")
+
+    monkeypatch.setattr(email_auth, "txt_records", boom)
+
+    class FakeResolver:
+        nameservers = ["1.1.1.1"]
+
+    status, summary, findings, raw = email_auth.scan("nope.invalid", FakeResolver())
+
+    assert status.value == "error"
+    assert "does not exist" in summary
+    # Both records report error, so scoring drops them instead of awarding zero.
+    assert raw["spf"]["status"] == raw["dmarc"]["status"] == "error"
