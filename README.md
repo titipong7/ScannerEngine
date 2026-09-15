@@ -16,6 +16,7 @@ app/scanners/dkim.py     DKIM selector discovery and key inspection
 app/scoring.py           Weighted score + A-F grade
 app/storage.py           Supabase writes (best effort)
 supabase/schema.sql      Table DDL
+deploy/                  bootstrap.sh, deploy.sh, Caddyfile
 tests/                   Offline unit tests
 web/                     Next.js dashboard (see web/README.md)
 ```
@@ -195,6 +196,23 @@ Copy `.env.example` to `.env` and fill in `SUPABASE_URL` and `SUPABASE_KEY`
 (use the **service-role** key — it is server-side only and bypasses RLS).
 Persistence is best effort: if Supabase is unreachable the scan still returns,
 with `"persisted": false`.
+
+## Deploying to Oracle Cloud
+
+`docs/DEPLOY-ORACLE.md` is the step-by-step guide (in Thai). The short version:
+
+```bash
+git clone https://github.com/titipong7/ScannerEngine.git && cd ScannerEngine
+bash deploy/bootstrap.sh        # Docker, firewall rules, outbound-DNS check
+cp .env.example .env && nano .env
+bash deploy/deploy.sh           # build, start, verify, roll back on failure
+```
+
+`docker-compose.prod.yml` adds Caddy in front for automatic TLS and caps the log
+files; the engine keeps its `127.0.0.1` binding, so the only public listeners are
+Caddy's 80 and 443. `deploy/deploy.sh` refuses to run without `API_KEY` set — an
+open scanner is a DNS-query cannon pointed at whoever the caller names — and
+rolls back to the previous image if the new container never reports healthy.
 
 ## Running with Docker Compose
 

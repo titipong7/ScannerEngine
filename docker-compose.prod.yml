@@ -1,0 +1,48 @@
+# Production overlay for the Oracle Cloud instance.
+#
+#   docker compose -f docker-compose.yml -f docker-compose.prod.yml up -d --build
+#
+# Differences from the development compose file:
+#   * Caddy terminates TLS with a certificate it obtains and renews by itself,
+#     and is the only thing listening on a public port. The engine keeps its
+#     127.0.0.1 binding from docker-compose.yml, so nobody can reach it from
+#     outside and skip TLS (or the API key);
+#   * logs are capped, because an Always Free boot volume is 50 GB and an
+#     uncapped json-file driver will eventually fill it.
+
+services:
+  scanner-engine:
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+  caddy:
+    image: caddy:2-alpine
+    container_name: scanner-caddy
+    restart: unless-stopped
+    depends_on:
+      scanner-engine:
+        condition: service_healthy
+    ports:
+      - "80:80"
+      - "443:443"
+      - "443:443/udp"          # HTTP/3
+    volumes:
+      - ./deploy/Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy-data:/data       # certificates live here — do not delete this volume
+      - caddy-config:/config
+    environment:
+      # Set these in the .env file next to this compose file.
+      SCANNER_DOMAIN: ${SCANNER_DOMAIN:?set SCANNER_DOMAIN in .env, e.g. scanner.example.com}
+      ACME_EMAIL: ${ACME_EMAIL:-}
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+volumes:
+  caddy-data:
+  caddy-config:

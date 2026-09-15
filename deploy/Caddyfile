@@ -1,0 +1,57 @@
+# Reverse proxy + automatic TLS for the Scanner Engine.
+#
+# Caddy obtains and renews a Let's Encrypt certificate on its own. All it needs
+# is that {$SCANNER_DOMAIN} resolves to this instance and that ports 80 and 443
+# are reachable from the internet — the HTTP-01 challenge uses port 80, so do
+# not close it after the first certificate is issued or renewal will fail.
+
+{
+	email {$ACME_EMAIL}
+	# Uncomment while testing to avoid Let's Encrypt's rate limits (5 failures
+	# per account per hostname per hour), then comment it out and restart.
+	# acme_ca https://acme-staging-v02.api.letsencrypt.org/directory
+}
+
+{$SCANNER_DOMAIN} {
+	encode zstd gzip
+
+	# The engine's own /health, exposed for uptime checks without the API key.
+	handle /health {
+		reverse_proxy scanner-engine:8000
+	}
+
+	handle /scan/* {
+		reverse_proxy scanner-engine:8000 {
+			# A full scan runs four modules; leave room for the slowest.
+			transport http {
+				response_header_timeout 90s
+			}
+		}
+	}
+
+	# Swagger UI and the OpenAPI document. Remove this block once the API is
+	# public — it is a map of every endpoint for anyone who finds the host.
+	handle /docs* {
+		reverse_proxy scanner-engine:8000
+	}
+	handle /openapi.json {
+		reverse_proxy scanner-engine:8000
+	}
+
+	handle {
+		respond "Scanner Engine" 404
+	}
+
+	header {
+		Strict-Transport-Security "max-age=31536000; includeSubDomains"
+		X-Content-Type-Options "nosniff"
+		X-Frame-Options "DENY"
+		Referrer-Policy "no-referrer"
+		-Server
+	}
+
+	log {
+		output stdout
+		format console
+	}
+}

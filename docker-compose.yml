@@ -10,7 +10,10 @@ services:
     env_file:
       - .env
     ports:
-      - "8000:8000"
+      # Bound to the loopback interface only. In production Caddy reaches the
+      # engine over the compose network, so this never needs to be public — and
+      # a published 0.0.0.0:8000 would let anyone bypass TLS and the API key.
+      - "127.0.0.1:8000:8000"
     # Public resolvers are required; the container must reach UDP/TCP 53 outbound.
     dns:
       - 1.1.1.1

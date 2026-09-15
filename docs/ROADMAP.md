@@ -33,7 +33,7 @@
 
 ## สัปดาห์ที่ 1 — Server และ Infrastructure
 
-**สถานะ: ยังไม่เริ่ม (รอ provision เครื่องจริง)**
+**สถานะ: เครื่องมือพร้อมหมดแล้ว เหลือรันบนเครื่องจริง — ดู `docs/DEPLOY-ORACLE.md`**
 
 - [ ] สมัคร Oracle Cloud และสร้าง Instance แบบ Always Free
       — เลือก **Ampere A1 (ARM64)**, Ubuntu 24.04, 4 OCPU / 24 GB
@@ -49,16 +49,11 @@
         ```
       — ตรวจว่า **outbound UDP/TCP 53 ออกได้** ไม่งั้นทุกการสแกนจะ timeout
       — ไม่ต้องเปิด 8000 ออกสู่อินเทอร์เน็ต ให้ Caddy proxy เข้ามาแทน
-- [ ] ติดตั้ง Docker + Compose plugin
-      ```bash
-      sudo apt-get update && sudo apt-get install -y docker.io docker-compose-plugin
-      sudo usermod -aG docker "$USER" && newgrp docker
-      ```
-- [ ] วาง Caddy หน้าเป็น reverse proxy เพื่อรับ TLS อัตโนมัติ
-      (`scanner.<โดเมนของคุณ> { reverse_proxy scanner-engine:8000 }`)
+- [x] สคริปต์ติดตั้ง Docker + Compose plugin (`deploy/bootstrap.sh`)
+- [x] Caddy reverse proxy + TLS อัตโนมัติ (`deploy/Caddyfile`, `docker-compose.prod.yml`)
 - [ ] ตั้ง `API_KEY` ใน `.env` เพื่อไม่ให้ใครก็ได้ยิง Scanner ของเรา
-- [ ] GitOps: ตั้ง deploy ด้วย `git pull && docker compose up -d --build`
-      (ยกระดับเป็น GitHub Actions + self-hosted runner ทีหลังได้)
+- [x] สคริปต์ deploy ที่ verify แล้ว rollback ให้ถ้า container ใหม่ไม่ healthy
+      (`deploy/deploy.sh`) — ยกระดับเป็น GitHub Actions ทีหลังได้
 
 **เกณฑ์ผ่าน:** `curl https://scanner.<domain>/health` ได้ `{"status":"ok"}` จากเครื่องนอก
 
