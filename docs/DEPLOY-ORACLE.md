@@ -8,6 +8,64 @@
 
 ---
 
+## 0. ทดสอบบนเครื่องตัวเองก่อน (ไม่ต้องมีโดเมน ไม่ต้องมี Oracle)
+
+ก่อนไปยุ่งกับคลาวด์ ควรรู้ก่อนว่าปัญหาที่เจอเป็นของเราหรือของ Oracle
+สคริปต์นี้รัน **stack เดียวกับ production** บนเครื่องคุณ — engine ตัวเดียวกัน
+Caddyfile ไฟล์เดียวกัน เส้นทาง reverse proxy เดียวกัน
+
+```bash
+git clone https://github.com/titipong7/ScannerEngine.git && cd ScannerEngine
+bash deploy/local-stack.sh up
+```
+
+สคริปต์จะสร้าง `.env` ให้ถ้ายังไม่มี (สุ่ม `API_KEY` ให้ด้วย เพื่อให้เส้นทาง
+ตรวจสอบสิทธิ์ถูกทดสอบจริง), build, start, รอจน healthy แล้วรัน smoke test ให้เลย
+
+เปิดที่ **https://localhost:8443** — เบราว์เซอร์จะเตือนเรื่องใบรับรอง 1 ครั้ง
+เป็นเรื่องปกติ เพราะ Caddy เซ็นด้วย CA ภายในของตัวเอง (ไม่ต้องมีโดเมน ไม่ต้องขอ
+Let's Encrypt) ใช้พอร์ต 8080/8443 เพื่อไม่ชนกับ web server ที่คุณอาจรันอยู่
+เปลี่ยนได้ด้วย `LOCAL_HTTP_PORT` / `LOCAL_HTTPS_PORT`
+
+คำสั่งอื่น:
+
+```bash
+bash deploy/local-stack.sh test              # รัน smoke test ซ้ำ
+bash deploy/local-stack.sh test --tls-suite  # เพิ่มชุด badssl.com
+bash deploy/local-stack.sh logs
+bash deploy/local-stack.sh down              # --clean เพื่อลบ volume ด้วย
+```
+
+### smoke test ทำอะไรบ้าง
+
+`deploy/smoke-test.sh` ใช้ได้กับทุกที่ — uvicorn เปล่าๆ, stack ในเครื่อง,
+หรือ Oracle จริง — และตรวจสิ่งที่ผู้ใช้จะสังเกตเห็นจริง ไม่ใช่แค่ว่าโปรเซสขึ้นแล้ว
+
+| กลุ่ม | ตรวจอะไร |
+|---|---|
+| Reachability | `/health` ตอบ 200, Supabase ต่อติดหรือไม่ |
+| Authentication | ไม่ส่ง key → 401, key ผิด → 401 |
+| Input validation | โดเมนผิดรูป → 422, ไม่ส่ง domain → 422, URL เต็มถูก normalize |
+| Scanners | DNSSEC: zone ที่เซ็น → `pass`, ไม่เซ็น → `fail`, พัง → `fail`; SPF อ่านได้; DKIM เจอคีย์; selector ที่ระบุเองแล้วไม่มี → `fail` |
+| Full scan | ได้คะแนนเป็นตัวเลข, โมดูลครบ 4, บันทึกลง Supabase (ถ้าตั้งค่าไว้) |
+| `--tls-suite` | badssl.com: expired / self-signed / wrong.host ต้อง `fail` ทั้งหมด |
+
+ยิงที่ไหนก็ได้:
+
+```bash
+bash deploy/smoke-test.sh --url http://localhost:8000                      # uvicorn เปล่า
+bash deploy/smoke-test.sh --url https://scanner.yourdomain.com --tls-suite # Oracle จริง
+```
+
+> `--tls-suite` ต้องต่อ TLS ออกเน็ตได้ตรงๆ ถ้าองค์กรคุณมี proxy ที่คั่น TLS ไว้
+> badssl จะกลายเป็น `pass` หมด ซึ่งเป็น false negative — สคริปต์เตือนไว้ให้แล้ว
+
+**พอชุดนี้ผ่านครบบนเครื่องตัวเอง** แปลว่าโค้ด, Docker image, Caddy config และ
+ตรรกะการสแกนใช้ได้หมด เหลือแค่เรื่องของคลาวด์ล้วนๆ (ไฟร์วอลล์, DNS, ใบรับรองจริง)
+ซึ่งคือขั้นตอนที่ 1 เป็นต้นไป
+
+---
+
 ## 1. สร้าง Instance
 
 ในคอนโซล Oracle → **Compute → Instances → Create instance**

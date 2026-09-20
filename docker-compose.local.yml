@@ -1,0 +1,47 @@
+# Run the production stack on your own machine, before touching Oracle.
+#
+#   bash deploy/local-stack.sh up
+#   # or by hand:
+#   docker compose -f docker-compose.yml -f docker-compose.local.yml up -d --build
+#
+# Same engine, same Caddyfile, same reverse-proxy path as production — the two
+# differences are deliberate:
+#
+#   * the site address is `localhost`, so Caddy signs it with its own internal
+#     CA instead of asking Let's Encrypt. No domain, no public IP, no ACME
+#     challenge. curl needs --insecure (or Caddy's root CA); a browser will warn
+#     once. That is the expected cost of testing without a domain.
+#   * host ports are 8080/8443 rather than 80/443, so nothing collides with a
+#     web server you already run. Override with LOCAL_HTTP_PORT / LOCAL_HTTPS_PORT.
+#
+# It is a separate file rather than a tweak to docker-compose.prod.yml because
+# Compose *appends* port lists when merging: overriding them there would leave
+# the container trying to bind both pairs.
+
+services:
+  caddy:
+    image: caddy:2-alpine
+    container_name: scanner-caddy-local
+    restart: unless-stopped
+    depends_on:
+      scanner-engine:
+        condition: service_healthy
+    ports:
+      - "${LOCAL_HTTP_PORT:-8080}:80"
+      - "${LOCAL_HTTPS_PORT:-8443}:443"
+    volumes:
+      - ./deploy/Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy-local-data:/data
+      - caddy-local-config:/config
+    environment:
+      SCANNER_DOMAIN: localhost
+      ACME_EMAIL: ""
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+volumes:
+  caddy-local-data:
+  caddy-local-config:

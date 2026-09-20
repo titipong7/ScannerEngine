@@ -16,7 +16,8 @@ app/scanners/dkim.py     DKIM selector discovery and key inspection
 app/scoring.py           Weighted score + A-F grade
 app/storage.py           Supabase writes (best effort)
 supabase/schema.sql      Table DDL
-deploy/                  bootstrap.sh, deploy.sh, remote-deploy.sh, Caddyfile
+deploy/                  bootstrap.sh, deploy.sh, remote-deploy.sh, local-stack.sh,
+                         smoke-test.sh, Caddyfile
 .github/workflows/       CI + auto-deploy
 tests/                   Offline unit tests
 web/                     Next.js dashboard (see web/README.md)
@@ -197,6 +198,30 @@ Copy `.env.example` to `.env` and fill in `SUPABASE_URL` and `SUPABASE_KEY`
 (use the **service-role** key — it is server-side only and bypasses RLS).
 Persistence is best effort: if Supabase is unreachable the scan still returns,
 with `"persisted": false`.
+
+## Trying it without a server
+
+The production stack runs on your own machine — same engine, same Caddyfile —
+with no domain, no public IP and no cloud account:
+
+```bash
+bash deploy/local-stack.sh up      # build, start, smoke test on https://localhost:8443
+```
+
+Caddy signs `localhost` with its own internal CA, so there is no ACME challenge
+to satisfy; the browser warns once and `curl` needs `--insecure`. That is the
+whole cost of testing without a domain.
+
+`deploy/smoke-test.sh` runs anywhere — a bare uvicorn, the local stack, or the
+real instance — and asserts behaviour a user would notice rather than that the
+process started: auth rejects a missing and a wrong key, malformed input is
+422, a signed zone passes DNSSEC while an unsigned one fails and a broken one
+fails differently, SPF and DKIM records are read, and a full scan returns a
+score from four modules.
+
+```bash
+bash deploy/smoke-test.sh --url https://scanner.example.com --tls-suite
+```
 
 ## Deploying to Oracle Cloud
 
